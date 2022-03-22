@@ -9,6 +9,17 @@
 #include <cmath>
 #include <string>
 
+const int Q_MAX_TURB = 160;
+
+float H_aval(const float Qtot)
+{
+    const float p1 = -1.453e-06;
+    const float p2 = 0.007022;
+    const float p3 = 99.98;
+    
+    return p1 * Qtot * Qtot + p2 * Qtot + p3;
+}
+
 std::array<std::function<float(float, float)>, 5> P_turb =
 {
     [](float x, float y) -> float
@@ -81,7 +92,7 @@ std::array<std::function<float(float, float)>, 5> P_turb =
 struct params
 {
     int Qmax;
-    float Hchute;
+    float Hamont;
     std::array<bool, 5> turbines_disponibles;
 };
 
@@ -95,7 +106,7 @@ std::ostream & operator<<(std::ostream & out, const params & par)
         << par.turbines_disponibles[3] << ", "
         << par.turbines_disponibles[4] << "]"
         << std::endl;
-    out << "Hchute : " << par.Hchute << std::endl;
+    out << "Hamont : " << par.Hamont << std::endl;
     return out;
 }
 
@@ -135,6 +146,8 @@ result optimise(params par)
     std::unordered_map<int, result> res_old;
     std::unordered_map<int, result> res_new;
 
+    const float Haval = H_aval(par.Qmax);
+
     // Pour chaque turbine
     for(std::size_t i = 0; i < 5; ++i)
     {
@@ -147,13 +160,15 @@ result optimise(params par)
             // trouver quel est le débit Qi optimal à faire passer dans la turbine i
             // (le reste du débit, Q - Qi, passera donc dans les turbines d'id < i) 
             result res_max{};
-            for(int Qi = 0; Qi <= Q; Qi += 5)
+            for(int Qi = 0; Qi <= Q && Qi <= Q_MAX_TURB; Qi += 5)
             {
                 result res_tmp = res_old[Q - Qi];
 
+                const float Hchute = par.Hamont - Haval - 0.5e-5 * Qi * Qi;
+
                 // ajouter la turbine courrante à la solution
                 res_tmp.Q[i] = Qi;
-                res_tmp.P[i] = P_turb[i](par.Hchute, Qi);
+                res_tmp.P[i] = P_turb[i](Hchute, Qi);
 
                 if(res_tmp.Ptot() > res_max.Ptot())
                 {
@@ -184,7 +199,7 @@ int round_q(float Q)
 struct data
 {
     int Qmax;
-    float Hchute;
+    float Hamont;
     std::array<int, 5> Q;
     std::array<float, 5> P;
 
@@ -195,7 +210,7 @@ struct data
 std::ostream & operator<<(std::ostream & out, const data & dat)
 {
     out << "Qmax : " << dat.Qmax << std::endl;
-    out << "Hchute : " << dat.Hchute << std::endl;
+    out << "Hamont : " << dat.Hamont << std::endl;
     out << "Q : [" 
         << dat.Q[0] << ", "
         << dat.Q[1] << ", "
@@ -240,18 +255,17 @@ std::vector<data> read_csv(fs::path path, std::size_t to_read)
     
     for(std::size_t i = 0; i<to_read; ++i)
     {
-        std::string Eval_str;
         std::string Qtot_str;
-        std::string Namont_str;
+        std::string Hamont_str;
         std::array<std::string, 5> P_str;
         std::array<std::string, 5> Q_str;
 
         in.ignore(FILE_SIZE, ';'); // date
-        std::getline(in, Eval_str, ';'); // Elav
+        in.ignore(FILE_SIZE, ';'); // Elav
         std::getline(in, Qtot_str, ';'); // Qtot
         in.ignore(FILE_SIZE, ';'); // Qturb
         in.ignore(FILE_SIZE, ';'); // Qvan
-        std::getline(in, Namont_str, ';'); // Namont
+        std::getline(in, Hamont_str, ';'); // Hamont
 
         for(std::size_t j = 0; j<5; ++j)
         {
@@ -261,12 +275,11 @@ std::vector<data> read_csv(fs::path path, std::size_t to_read)
 
         in.ignore(FILE_SIZE, '\n');
 
-        sanitize(Eval_str);
         sanitize(Qtot_str);
-        sanitize(Namont_str);
+        sanitize(Hamont_str);
 
         const int Qmax = round_q(std::stof(Qtot_str));
-        const float Hchute = std::stof(Namont_str) - std::stof(Eval_str);
+        const float Hamont = std::stof(Hamont_str);
 
         std::array<int, 5> Q;
         std::array<float, 5> P;
@@ -275,14 +288,14 @@ std::vector<data> read_csv(fs::path path, std::size_t to_read)
         {
             sanitize(Q_str[j]);
             sanitize(P_str[j]);
-            Q[j] = round_q(std::stof(Q_str[j]));
+            Q[j] = static_cast<int>(std::round(std::stof(Q_str[j])));
             P[j] = std::stof(P_str[j]);
         }
 
         lines.push_back(
         {
             .Qmax = Qmax,
-            .Hchute = Hchute,
+            .Hamont = Hamont,
             .Q = Q,
             .P = P,
         });
@@ -293,35 +306,41 @@ std::vector<data> read_csv(fs::path path, std::size_t to_read)
 
 void write_csv_head(std::ostream & out)
 {
-    out << "Qtot" << ";" 
-        << "Hchute" << ";" 
+    out << "Qmax" << ";" 
+        << "Hamont" << ";" 
         << "P1" << ";" << "Q1" << ";" 
         << "P2" << ";" << "Q2" << ";" 
         << "P3" << ";" << "Q3" << ";" 
         << "P4" << ";" << "Q4" << ";" 
-        << "P5" << ";" << "Q5" << ";" 
+        << "P5" << ";" << "Q5" << ";"
+        << "Ptot" << ";" << "Qtot" << ";"
         << ";"
-        << "Pr1" << ";" << "Qr1" << ";" 
-        << "Pr2" << ";" << "Qr2" << ";" 
-        << "Pr3" << ";" << "Qr3" << ";" 
-        << "Pr4" << ";" << "Qr4" << ";" 
-        << "Pr5" << ";" << "Qr5" << std::endl;
+        << ";"
+        << "Preel1" << ";" << "Qreel1" << ";" 
+        << "Preel2" << ";" << "Qreel2" << ";" 
+        << "Preel3" << ";" << "Qreel3" << ";" 
+        << "Preel4" << ";" << "Qreel4" << ";" 
+        << "Preel5" << ";" << "Qreel5" << ";"
+        << "Preel_tot" << ";" << "Qreel_tot" << std::endl;
 }
 void write_csv_line(std::ostream & out, const data & dat, const result & res)
 {
     out << dat.Qmax << ";" 
-        << dat.Hchute << ";" 
+        << dat.Hamont << ";"
         << res.P[1-1] << ";" << res.Q[1-1] << ";" 
         << res.P[2-1] << ";" << res.Q[2-1] << ";" 
         << res.P[3-1] << ";" << res.Q[3-1] << ";" 
         << res.P[4-1] << ";" << res.Q[4-1] << ";" 
         << res.P[5-1] << ";" << res.Q[5-1] << ";" 
+        << res.Ptot() << ";" << res.Qtot() << ";" 
+        << ";"
         << ";"
         << dat.P[1-1] << ";" << dat.Q[1-1] << ";" 
         << dat.P[2-1] << ";" << dat.Q[2-1] << ";" 
         << dat.P[3-1] << ";" << dat.Q[3-1] << ";" 
         << dat.P[4-1] << ";" << dat.Q[4-1] << ";" 
-        << dat.P[5-1] << ";" << dat.Q[5-1] << std::endl;
+        << dat.P[5-1] << ";" << dat.Q[5-1] << ";" 
+        << dat.Ptot() << ";" << dat.Qtot() << std::endl;
 }
 
 int main()
@@ -344,7 +363,7 @@ int main()
         params par =
         {
             .Qmax = line.Qmax,
-            .Hchute = line.Hchute,
+            .Hamont = line.Hamont,
             .turbines_disponibles = {true, true, true, true, true}, 
         };
 
