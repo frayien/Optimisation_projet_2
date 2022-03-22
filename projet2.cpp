@@ -331,7 +331,7 @@ int main()
     fs::path path_out("data_out.csv");
     for(int i = 1; fs::exists(path_out); ++i)
     {
-        path_out.replace_filename("data_out(" + std::to_string(i) + ")");
+        path_out.replace_filename("data_out(" + std::to_string(i) + ").csv");
     }
 
     std::ofstream out(path_out, std::ios::trunc);
