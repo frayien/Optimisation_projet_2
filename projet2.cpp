@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <cmath>
+#include <string>
 
 std::array<std::function<float(float, float)>, 5> P_turb =
 {
