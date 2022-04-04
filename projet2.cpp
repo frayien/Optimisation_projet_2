@@ -8,6 +8,7 @@
 #include <fstream>
 #include <cmath>
 #include <string>
+#include <chrono>
 
 const int Q_MAX_TURB = 160;
 
@@ -358,6 +359,7 @@ int main()
 
     write_csv_head(out);
 
+    auto start_time = std::chrono::high_resolution_clock::now();
     for(const data & line : file_data)
     {
         params par =
@@ -371,6 +373,10 @@ int main()
 
         write_csv_line(out, line, res);
     }
+
+    auto end_time = std::chrono::high_resolution_clock::now();
+
+    std::cout << "Solved in " << (end_time - start_time).count() << "ns" << std::endl;
 
     out.close();
 
